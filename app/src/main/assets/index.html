@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ValTracker</title>
+<style>
+:root{--bg:#0f1923;--card:#1b2733;--card2:#22313f;--line:#2e3e4e;--txt:#ece8e1;--mut:#8b978f;--red:#ff4655;--grn:#3ddc97;--gold:#f5c542;--blu:#4fb3ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 system-ui,-apple-system,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:10px 14px}
+header h1{font-size:18px;margin:0;flex:1;letter-spacing:.5px}header h1 b{color:var(--red)}
+button,select,input{font:inherit;color:var(--txt)}
+.ib{background:none;border:0;font-size:20px;padding:4px 8px}
+main{padding:12px 14px 40px}
+.card{background:var(--card);border-radius:10px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center}.wrap{flex-wrap:wrap}.grow{flex:1;min-width:0}
+input,select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%}
+.btn{background:var(--red);border:0;border-radius:8px;padding:10px 14px;font-weight:600}
+.btn.sec{background:var(--card2);border:1px solid var(--line)}
+.mut{color:var(--mut)}.small{font-size:12px}.big{font-size:22px;font-weight:700}
+.g{color:var(--grn)}.r{color:var(--red)}.y{color:var(--gold)}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:0 -14px 12px;padding:0 14px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{white-space:nowrap;background:var(--card);border:0;border-radius:16px;padding:7px 14px}
+.tab.on{background:var(--red)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--card2);border-radius:8px;padding:8px}
+.stat .v{font-size:17px;font-weight:700}.stat .l{font-size:11px;color:var(--mut);text-transform:uppercase}
+.hero{position:relative;border-radius:10px;overflow:hidden;margin-bottom:12px;background:var(--card)}
+.hero img.bg{width:100%;height:110px;object-fit:cover;display:block;opacity:.55}
+.hero .inf{position:absolute;left:12px;bottom:10px;right:12px}
+.hero .nm{font-size:20px;font-weight:700;text-shadow:0 1px 4px #000}
+.rk{display:flex;align-items:center;gap:10px}.rk img{width:52px;height:52px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{color:var(--mut);font-weight:500;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{text-align:right;padding:7px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+.tw{overflow-x:auto;margin:0 -12px;padding:0 12px}
+.ic{width:26px;height:26px;border-radius:4px;vertical-align:middle;margin-right:6px;background:var(--card2)}
+.m{display:flex;gap:10px;align-items:center;padding:10px;border-radius:10px;background:var(--card);margin-bottom:8px;border-left:4px solid var(--mut)}
+.m.W{border-left-color:var(--grn)}.m.L{border-left-color:var(--red)}
+.m img.ag{width:42px;height:42px;border-radius:6px}
+.bar{height:6px;background:var(--card2);border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;background:var(--red)}
+.chip{display:inline-block;background:var(--card2);border-radius:12px;padding:5px 10px;margin:0 6px 6px 0}
+.rounds{display:flex;flex-wrap:wrap;gap:3px}.rounds span{width:18px;height:18px;border-radius:3px;font-size:10px;display:flex;align-items:center;justify-content:center}
+.me td{background:#ff465522}
+.err{background:#ff465522;border:1px solid var(--red);border-radius:8px;padding:10px;margin-bottom:12px}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:s 1s linear infinite;margin:40px auto}
+@keyframes s{to{transform:rotate(360deg)}}
+a{color:var(--blu)}
+h3{margin:0 0 10px;font-size:15px}
+</style>
+</head>
+<body>
+<header><button class="ib" id="backBtn" onclick="appBack()" style="display:none">‹</button><h1>VAL<b>TRACKER</b></h1><button class="ib" onclick="go('settings')">⚙</button></header>
+<main id="app"></main>
+<script>
+const API='https://api.henrikdev.xyz';
+const MEDIA='https://media.valorant-api.com';
+const TIERSET='03621f52-342b-cf4e-4f86-9350a49c6d04';
+const MODES=[['competitive','Competitive'],['unrated','Unrated'],['swiftplay','Swiftplay'],['premier','Premier'],['deathmatch','Deathmatch'],['teamdeathmatch','Team DM'],['spikerush','Spike Rush'],['','All modes']];
+const REGIONS=['eu','na','ap','kr','latam','br'];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const n=(v,d=0)=>isFinite(v)?(+v).toFixed(d):'–';
+const pct=(a,b)=>b?n(100*a/b,1)+'%':'–';
+const div=(a,b,d=2)=>b?n(a/b,d):(a?n(a,d):'–');
+const img=(src,cls='ic')=>src?`<img class="${cls}" src="${esc(src)}" loading="lazy" onerror="this.style.visibility='hidden'">`:'';
+const agentIcon=id=>id?`${MEDIA}/agents/${id}/displayicon.png`:'';
+const tierIcon=t=>t!=null&&t!==''?`${MEDIA}/competitivetiers/${TIERSET}/${t}/largeicon.png`:'';
+const mapIcon=id=>id?`${MEDIA}/maps/${id}/listviewicon.png`:'';
+const ago=d=>{const s=(Date.now()-new Date(d))/1000;if(!isFinite(s))return'';if(s<3600)return Math.max(1,s/60|0)+'m ago';if(s<86400)return(s/3600|0)+'h ago';return(s/86400|0)+'d ago'};
+
+// ---------- native/web HTTP ----------
+let cbId=0;const cbs={};
+window.__nativeCb=(id,status,body)=>{const f=cbs[id];delete cbs[id];if(f)f(status,body)};
+const cache={};
+function get(path){
+  if(cache[path])return Promise.resolve(cache[path]);
+  const key=ls.get('apikey','');
+  return new Promise((res,rej)=>{
+    const done=(status,body)=>{
+      let j;try{j=JSON.parse(body)}catch(e){j=null}
+      if(status>=200&&status<300&&j){cache[path]=j;res(j);return}
+      let msg=(j&&j.errors&&j.errors[0]&&(j.errors[0].message||j.errors[0].details))||('HTTP '+status);
+      if(status===401||status===403)msg='API key missing or invalid — open ⚙ Settings. ('+msg+')';
+      if(status===429)msg='Rate limited by the API — wait a minute and retry.';
+      if(status===404)msg='Not found: '+msg;
+      const e=new Error(msg);e.status=status;rej(e);
+    };
+    if(window.NativeHttp){const id=++cbId;cbs[id]=done;NativeHttp.get(id,API+path,key)}
+    else fetch(API+path,{headers:key?{Authorization:key}:{}}).then(async r=>done(r.status,await r.text())).catch(e=>done(0,JSON.stringify({errors:[{message:e.message}]})));
+  });
+}
+
+// ---------- state / nav ----------
+let S={view:'home',stack:[]};
+let P=null; // profile data
+function go(view,arg){S.stack.push({view:S.view,arg:S.arg,tab:S.tab});S.view=view;S.arg=arg;render();window.scrollTo(0,0)}
+window.appBack=()=>{if(!S.stack.length)return false;const p=S.stack.pop();Object.assign(S,p);render();return true};
+function render(){
+  $('#backBtn').style.display=S.stack.length?'':'none';
+  ({home:vHome,settings:vSettings,profile:vProfile,match:vMatch})[S.view](S.arg);
+}
+
+// ---------- home ----------
+function vHome(){
+  const recent=ls.get('recent',[]),favs=ls.get('favs',[]);
+  const chips=(arr,lbl)=>arr.length?`<div class="card"><h3>${lbl}</h3>${arr.map(r=>`<span class="chip" onclick='openP(${JSON.stringify(r).replace(/'/g,"&#39;")})'>${esc(r.name)}<span class="mut">#${esc(r.tag)}</span></span>`).join('')}</div>`:'';
+  $('#app').innerHTML=`
+  ${ls.get('apikey','')?'':`<div class="err">No API key set. Stats come from the HenrikDev Valorant API, which needs a free key. Tap ⚙ to add one.</div>`}
+  <div class="card">
+    <h3>Search player</h3>
+    <input id="q" placeholder="Name#TAG" autocapitalize="off" autocomplete="off" value="${esc(ls.get('lastq',''))}">
+    <div class="row" style="margin-top:8px">
+      <select id="rg" class="grow"><option value="">Auto region</option>${REGIONS.map(r=>`<option>${r}</option>`).join('')}</select>
+      <select id="pf" class="grow"><option value="pc">PC</option><option value="console">Console</option></select>
+    </div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="search()">Track</button>
+  </div>
+  ${chips(favs,'★ Favorites')}${chips(recent,'Recent')}
+  <p class="mut small">Unofficial app. Not affiliated with Riot Games or Tracker Network. Data: api.henrikdev.xyz.</p>`;
+  $('#q').onkeydown=e=>{if(e.key==='Enter')search()};
+}
+function search(){
+  const q=$('#q').value.trim();ls.set('lastq',q);
+  const i=q.lastIndexOf('#');
+  if(i<1){alertBox('Enter Riot ID as Name#TAG');return}
+  openP({name:q.slice(0,i).trim(),tag:q.slice(i+1).trim(),region:$('#rg').value,platform:$('#pf').value});
+}
+function alertBox(m){const d=document.createElement('div');d.className='err';d.textContent=m;$('#app').prepend(d);setTimeout(()=>d.remove(),4000)}
+function openP(r){P={id:r,mode:ls.get('mode','competitive')};S.tab='overview';go('profile',r)}
+
+// ---------- settings ----------
+function vSettings(){
+  $('#app').innerHTML=`<div class="card"><h3>HenrikDev API key</h3>
+  <p class="mut small">Tracker.gg has no public Valorant API, so this app uses the free unofficial HenrikDev API. Get a key (Basic, free) by logging in with Discord at <a href="https://api.henrikdev.xyz/dashboard/">api.henrikdev.xyz/dashboard</a>.</p>
+  <input id="k" placeholder="HDEV-xxxxxxxx-xxxx-..." value="${esc(ls.get('apikey',''))}" autocapitalize="off">
+  <button class="btn" style="width:100%;margin-top:8px" onclick="ls.set('apikey',$('#k').value.trim());for(const k in cache)delete cache[k];appBack()">Save</button></div>
+  <div class="card"><h3>Data</h3><button class="btn sec" onclick="ls.set('recent',[]);ls.set('favs',[]);alertBox('Cleared')">Clear recent & favorites</button></div>`;
+}
+
+// ---------- profile ----------
+const enc=encodeURIComponent;
+async function loadProfile(){
+  const id=P.id,nm=enc(id.name),tg=enc(id.tag);
+  if(!P.acc){
+    const a=await get(`/valorant/v2/account/${nm}/${tg}`);P.acc=a.data;
+    P.region=id.region||P.acc.region||'eu';P.platform=id.platform||'pc';
+    const rec=ls.get('recent',[]).filter(r=>!(r.name.toLowerCase()===P.acc.name.toLowerCase()&&r.tag.toLowerCase()===P.acc.tag.toLowerCase()));
+    rec.unshift({name:P.acc.name,tag:P.acc.tag,region:P.region,platform:P.platform});ls.set('recent',rec.slice(0,10));
+  }
+  const base=`${P.region}/${P.platform}/${nm}/${tg}`;
+  const q=P.mode?`?mode=${P.mode}`:'?';
+  const [mmr,hist,matches,stored]=await Promise.allSettled([
+    get(`/valorant/v3/mmr/${base}`),
+    get(`/valorant/v2/mmr-history/${base}`),
+    get(`/valorant/v4/matches/${base}${q}&size=10`),
+    get(`/valorant/v1/stored-matches/${P.region}/${nm}/${tg}${q}&size=100`)
+  ]);
+  P.mmr=mmr.value?.data;P.hist=hist.value?.data;P.matches=matches.value?.data||[];P.stored=stored.value?.data||[];
+  P.errs=[mmr,hist,matches,stored].filter(x=>x.status==='rejected').map(x=>x.reason.message);
+  P.puuid=P.acc.puuid;P.loaded=P.mode;
+  P.adv=aggAdvanced(P.matches,P.puuid);
+}
+async function moreMatches(){
+  const b=$('#more');if(b){b.disabled=true;b.textContent='Loading…'}
+  const q=P.mode?`?mode=${P.mode}`:'?';
+  try{
+    const r=await get(`/valorant/v4/matches/${P.region}/${P.platform}/${enc(P.id.name)}/${enc(P.id.tag)}${q}&size=10&start=${P.matches.length}`);
+    const ids=new Set(P.matches.map(m=>m.metadata?.match_id));
+    const add=(r.data||[]).filter(m=>!ids.has(m.metadata?.match_id));
+    P.matches.push(...add);P.adv=aggAdvanced(P.matches,P.puuid);
+    if(!add.length&&b){b.textContent='No more matches';return}
+  }catch(e){alertBox(e.message)}
+  render();
+}
+async function vProfile(){
+  if(!P.acc||P.loaded!==P.mode){
+    $('#app').innerHTML='<div class="spin"></div>';
+    try{await loadProfile()}catch(e){$('#app').innerHTML=`<div class="err">${esc(e.message)}</div><button class="btn sec" onclick="P.acc=null;render()">Retry</button>`;return}
+    if(S.view!=='profile')return;
+  }
+  const a=P.acc,c=a.card;
+  const wide=typeof c==='string'?`${MEDIA}/playercards/${c}/wideart.png`:(c?.wide||'');
+  const fav=ls.get('favs',[]).some(f=>f.name===a.name&&f.tag===a.tag);
+  const tabs=[['overview','Overview'],['matches','Matches'],['agents','Agents'],['maps','Maps'],['weapons','Weapons'],['ranks','Rank History']];
+  $('#app').innerHTML=`
+  <div class="hero">${wide?`<img class="bg" src="${esc(wide)}">`:'<div style="height:110px"></div>'}
+    <div class="inf"><div class="nm">${esc(a.name)}<span class="mut">#${esc(a.tag)}</span>
+      <button class="ib" style="float:right" onclick="toggleFav()">${fav?'★':'☆'}</button></div>
+    <div class="small">Level ${esc(a.account_level)} · ${esc(P.region.toUpperCase())} · ${esc(P.platform.toUpperCase())}</div></div></div>
+  <div class="row" style="margin-bottom:10px"><select class="grow" onchange="P.mode=this.value;ls.set('mode',P.mode);render()">${MODES.map(([v,l])=>`<option value="${v}" ${v===P.mode?'selected':''}>${l}</option>`).join('')}</select>
+  <button class="btn sec" onclick="for(const k in cache)delete cache[k];P.loaded=null;render()">↻</button></div>
+  <div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${S.tab===k?'on':''}" onclick="S.tab='${k}';render()">${l}</button>`).join('')}</div>
+  ${P.errs.length?`<div class="err small">${P.errs.map(esc).join('<br>')}</div>`:''}
+  <div id="tc"></div>`;
+  ({overview:tOverview,matches:tMatches,agents:tAgents,maps:tMaps,weapons:tWeapons,ranks:tRanks})[S.tab]();
+}
+function toggleFav(){
+  const a=P.acc;let f=ls.get('favs',[]);
+  if(f.some(x=>x.name===a.name&&x.tag===a.tag))f=f.filter(x=>!(x.name===a.name&&x.tag===a.tag));
+  else f.unshift({name:a.name,tag:a.tag,region:P.region,platform:P.platform});
+  ls.set('favs',f);render();
+}
+const statBox=(l,v,cls='')=>`<div class="stat"><div class="l">${l}</div><div class="v ${cls}">${v}</div></div>`;
+
+// ---------- analysis of a v4 match ----------
+function analyzeMatch(m){
+  const players=m.players||[];
+  const rounds=m.rounds||[];
+  const kills=(m.kills||[]).slice().sort((x,y)=>(x.round-y.round)||(x.time_in_round_in_ms-y.time_in_round_in_ms));
+  const nR=rounds.length||((m.teams||[]).reduce((s,t)=>Math.max(s,(t.rounds?.won||0)+(t.rounds?.lost||0)),0))||1;
+  const S={};
+  for(const p of players){
+    const st=p.stats||{};
+    S[p.puuid]={p,rounds:nR,score:st.score||0,k:st.kills||0,d:st.deaths||0,a:st.assists||0,hs:st.headshots||0,bs:st.bodyshots||0,lg:st.legshots||0,
+      dmg:st.damage?.dealt??st.damage?.made??0,dmgR:st.damage?.received??0,fk:0,fd:0,kast:0,mk:{2:0,3:0,4:0,5:0},plants:0,defuses:0,clutch:0,weapons:{},econ:0};
+  }
+  const byRound={};for(const k of kills)(byRound[k.round]??=[]).push(k);
+  for(let r=0;r<nR;r++){
+    const ks=byRound[r]||[];
+    if(ks.length){const f=ks[0];if(S[f.killer?.puuid])S[f.killer.puuid].fk++;if(S[f.victim?.puuid])S[f.victim.puuid].fd++}
+    const cnt={};
+    for(const k of ks){const kp=k.killer?.puuid;if(kp&&kp!==k.victim?.puuid){cnt[kp]=(cnt[kp]||0)+1;
+      if(S[kp]){const w=k.weapon?.name||k.damage_weapon_name||'Ability';const W=(S[kp].weapons[w]??={k:0,id:k.weapon?.id||k.damage_weapon_id});W.k++}}}
+    for(const [pu,c] of Object.entries(cnt))if(S[pu]&&c>=2)S[pu].mk[Math.min(c,5)]++;
+    for(const pu in S){
+      const kd=cnt[pu]>0,as=ks.some(k=>(k.assistants||[]).some(x=>(x.puuid||x.assistant_puuid)===pu));
+      const death=ks.find(k=>k.victim?.puuid===pu);
+      let traded=false;
+      if(death){const killer=death.killer?.puuid;traded=ks.some(k=>k.victim?.puuid===killer&&k.time_in_round_in_ms>=death.time_in_round_in_ms&&k.time_in_round_in_ms-death.time_in_round_in_ms<=5000)}
+      if(kd||as||!death||traded)S[pu].kast++;
+    }
+    const rd=rounds[r];
+    if(rd){
+      const pl=rd.plant?.player?.puuid||rd.plant_events?.planted_by?.puuid;if(S[pl])S[pl].plants++;
+      const df=rd.defuse?.player?.puuid||rd.defuse_events?.defused_by?.puuid;if(S[df])S[df].defuses++;
+      // clutch: last alive on winning team while facing >=1 enemy
+      const win=rd.winning_team;
+      if(win&&ks.length){
+        const alive={};for(const p of players)alive[p.puuid]=true;
+        let cand=null;
+        for(const k of ks){alive[k.victim?.puuid]=false;
+          const mine=players.filter(p=>p.team_id===win&&alive[p.puuid]),opp=players.filter(p=>p.team_id!==win&&alive[p.puuid]);
+          if(!cand&&mine.length===1&&opp.length>=1)cand=mine[0].puuid;}
+        if(cand&&S[cand])S[cand].clutch++;
+      }
+      for(const s of rd.stats||[]){const pu=s.player?.puuid;if(S[pu])S[pu].econ+=s.economy?.loadout_value||0}
+    }
+  }
+  return {nR,S};
+}
+function matchSummary(m,me){
+  const pl=(m.players||[]).find(p=>p.puuid===me);
+  const team=(m.teams||[]).find(t=>t.team_id===pl?.team_id);
+  const other=(m.teams||[]).find(t=>t.team_id!==pl?.team_id);
+  let res='D';if(team){res=team.won?'W':((team.rounds?.won===team.rounds?.lost)?'D':'L')}
+  return {pl,team,other,res};
+}
+function aggAdvanced(matches,me){
+  const A={games:0,w:0,l:0,d:0,rounds:0,score:0,k:0,dd:0,a:0,hs:0,bs:0,lg:0,dmg:0,dmgR:0,fk:0,fd:0,kast:0,mk:{2:0,3:0,4:0,5:0},plants:0,defuses:0,clutch:0,weapons:{},agents:{},maps:{}};
+  for(const m of matches){
+    const {S:st}=analyzeMatch(m),x=st[me];if(!x)continue;
+    const {res}=matchSummary(m,me);
+    A.games++;A[res==='W'?'w':res==='L'?'l':'d']++;
+    A.rounds+=x.rounds;A.score+=x.score;A.k+=x.k;A.dd+=x.d;A.a+=x.a;A.hs+=x.hs;A.bs+=x.bs;A.lg+=x.lg;A.dmg+=x.dmg;A.dmgR+=x.dmgR;
+    A.fk+=x.fk;A.fd+=x.fd;A.kast+=x.kast;A.plants+=x.plants;A.defuses+=x.defuses;A.clutch+=x.clutch;
+    for(const q of [2,3,4,5])A.mk[q]+=x.mk[q];
+    for(const [w,v] of Object.entries(x.weapons)){const W=(A.weapons[w]??={k:0,id:v.id});W.k+=v.k}
+  }
+  return A;
+}
+// stored matches (lightweight, up to 100) aggregate by key
+function aggStored(keyFn){
+  const out={};
+  for(const m of P.stored){
+    const s=m.stats||{};const key=keyFn(m);if(!key)continue;
+    const o=(out[key.k]??={name:key.k,icon:key.icon,games:0,w:0,l:0,k:0,d:0,a:0,hs:0,bs:0,lg:0,dmg:0,score:0,rounds:0});
+    const my=(s.team||'').toLowerCase(),t=m.teams||{};const mine=t[my]??0,opp=my==='red'?t.blue:t.red;
+    o.games++;if(mine>opp)o.w++;else if(mine<opp)o.l++;
+    o.k+=s.kills||0;o.d+=s.deaths||0;o.a+=s.assists||0;o.hs+=s.shots?.head||0;o.bs+=s.shots?.body||0;o.lg+=s.shots?.leg||0;
+    o.dmg+=s.damage?.made||0;o.score+=s.score||0;o.rounds+=(t.red||0)+(t.blue||0);
+  }
+  return Object.values(out).sort((a,b)=>b.games-a.games);
+}
+
+// ---------- tabs ----------
+function tOverview(){
+  const m=P.mmr,cur=m?.current||m?.current_data,pk=m?.peak||m?.highest_rank,A=P.adv;
+  const tierName=cur?.tier?.name||cur?.currenttierpatched||'Unrated',tierId=cur?.tier?.id??cur?.currenttier;
+  const rr=cur?.rr??cur?.ranking_in_tier,lc=cur?.last_change??cur?.mmr_change_to_last_game;
+  const tot=aggStored(()=>({k:'all'}))[0];
+  const hsAll=A.hs+A.bs+A.lg;
+  $('#tc').innerHTML=`
+  <div class="card"><div class="row">
+    <div class="rk grow">${img(tierIcon(tierId),'')}<div><div class="mut small">Current rating</div><div class="big">${esc(tierName)}</div>
+      <div class="small">${rr!=null?esc(rr)+' RR':''} ${lc!=null?`<span class="${lc>=0?'g':'r'}">${lc>=0?'+':''}${esc(lc)}</span>`:''}${cur?.games_needed_for_rating?` · ${cur.games_needed_for_rating} games to rank`:''}</div></div></div>
+    ${pk?`<div class="rk">${img(tierIcon(pk.tier?.id??pk.tier),'')}<div><div class="mut small">Peak</div><div><b>${esc(pk.tier?.name||pk.patched_tier||'')}</b></div><div class="mut small">${esc(pk.season?.short||pk.season||'')}</div></div></div>`:''}
+  </div>${cur?.elo!=null?`<div class="mut small" style="margin-top:6px">ELO ${esc(cur.elo)} ${cur.leaderboard_placement?.rank?`· Leaderboard #${esc(cur.leaderboard_placement.rank)}`:''}</div>`:''}</div>
+  ${A.games?`<div class="card"><h3>Last ${A.games} matches <span class="mut small">(detailed)</span></h3>
+  <div class="row small" style="margin-bottom:8px"><span class="g">${A.w}W</span>&nbsp;<span class="r">${A.l}L</span>&nbsp;${A.d?`<span class="mut">${A.d}D</span>`:''}<span class="grow"></span>Win ${pct(A.w,A.games)}</div>
+  <div class="bar" style="margin-bottom:10px"><i style="width:${A.games?100*A.w/A.games:0}%;background:var(--grn)"></i></div>
+  <div class="grid">
+    ${statBox('K/D',div(A.k,A.dd),A.k>=A.dd?'g':'r')}${statBox('KDA',div(A.k+A.a,A.dd))}${statBox('ACS',div(A.score,A.rounds,0))}
+    ${statBox('ADR',div(A.dmg,A.rounds,0))}${statBox('HS%',pct(A.hs,hsAll))}${statBox('KAST',pct(A.kast,A.rounds))}
+    ${statBox('DDΔ/Rnd',n((A.dmg-A.dmgR)/(A.rounds||1),0),A.dmg>=A.dmgR?'g':'r')}${statBox('Kills/Rnd',div(A.k,A.rounds))}${statBox('Win %',pct(A.w,A.games))}
+    ${statBox('Kills',A.k)}${statBox('Deaths',A.dd)}${statBox('Assists',A.a)}
+    ${statBox('First Bloods',A.fk)}${statBox('First Deaths',A.fd)}${statBox('FK/FD',div(A.fk,A.fd))}
+    ${statBox('Clutches',A.clutch)}${statBox('Plants',A.plants)}${statBox('Defuses',A.defuses)}
+    ${statBox('2K',A.mk[2])}${statBox('3K',A.mk[3])}${statBox('4K',A.mk[4])}
+    ${statBox('Aces',A.mk[5],'y')}${statBox('Rounds',A.rounds)}${statBox('Matches',A.games)}
+  </div>
+  <h3 style="margin-top:12px">Accuracy</h3>
+  ${['Head','Body','Legs'].map((l,i)=>{const v=[A.hs,A.bs,A.lg][i];return `<div class="row small"><span style="width:44px">${l}</span><div class="bar grow"><i style="width:${hsAll?100*v/hsAll:0}%"></i></div><span style="width:70px;text-align:right">${pct(v,hsAll)} <span class="mut">(${v})</span></span></div>`}).join('<div style="height:6px"></div>')}
+  </div>`:''}
+  ${tot?`<div class="card"><h3>Last ${tot.games} matches <span class="mut small">(summary)</span></h3><div class="grid">
+    ${statBox('Win %',pct(tot.w,tot.games))}${statBox('K/D',div(tot.k,tot.d))}${statBox('KDA',div(tot.k+tot.a,tot.d))}
+    ${statBox('ACS',div(tot.score,tot.rounds,0))}${statBox('ADR',div(tot.dmg,tot.rounds,0))}${statBox('HS%',pct(tot.hs,tot.hs+tot.bs+tot.lg))}
+    ${statBox('Wins',tot.w)}${statBox('Losses',tot.l)}${statBox('Kills',tot.k)}
+  </div></div>`:''}
+  ${topList('Top Agents',aggStored(m=>({k:m.stats?.character?.name,icon:agentIcon(m.stats?.character?.id)})).slice(0,3))}
+  ${topList('Top Maps',aggStored(m=>({k:m.meta?.map?.name,icon:mapIcon(m.meta?.map?.id)})).slice(0,3))}`;
+}
+function topList(title,rows){
+  if(!rows.length)return'';
+  return `<div class="card"><h3>${title}</h3>${rows.map(r=>`<div class="row" style="margin-bottom:8px">${img(r.icon)}<div class="grow"><b>${esc(r.name)}</b><div class="mut small">${r.games} games · ${pct(r.w,r.games)} win</div></div><div style="text-align:right"><b>${div(r.k,r.d)}</b> <span class="mut small">K/D</span><div class="mut small">${div(r.score,r.rounds,0)} ACS</div></div></div>`).join('')}</div>`;
+}
+function tMatches(){
+  if(!P.matches.length){$('#tc').innerHTML='<div class="card mut">No matches found for this mode.</div>';return}
+  $('#tc').innerHTML=P.matches.map((m,i)=>{
+    const {pl,team,other,res}=matchSummary(m,P.puuid);if(!pl)return'';
+    const {S:st,nR}=analyzeMatch(m),x=st[P.puuid];
+    const md=m.metadata||{};
+    const shots=x.hs+x.bs+x.lg;
+    const place=Object.values(st).sort((a,b)=>b.score-a.score).findIndex(v=>v.p.puuid===P.puuid)+1;
+    return `<div class="m ${res}" onclick="go('match',${i})">
+      ${img(agentIcon(pl.agent?.id),'ag')}
+      <div class="grow"><b>${esc(md.map?.name)}</b> <span class="mut small">${esc(md.queue?.name||md.queue?.id||'')}</span>
+        <div class="small mut">${ago(md.started_at)} · ${esc(pl.agent?.name)} ${pl.tier?.name&&pl.tier.name!=='Unrated'?'· '+esc(pl.tier.name):''}</div>
+        <div class="small">${x.k}/${x.d}/${x.a} · <span class="mut">ACS</span> ${div(x.score,nR,0)} · <span class="mut">ADR</span> ${div(x.dmg,nR,0)} · <span class="mut">HS</span> ${pct(x.hs,shots)}</div></div>
+      <div style="text-align:right">${team?`<div class="big ${res==='W'?'g':res==='L'?'r':''}">${team.rounds?.won??''}:${other?.rounds?.won??team.rounds?.lost??''}</div>`:''}<div class="small mut">${place?ord(place):''}</div></div></div>`;
+  }).join('')+`<button id="more" class="btn sec" style="width:100%" onclick="moreMatches()">Load more</button>`;
+}
+const ord=n=>n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:(n%10<4?n%10:0)]||'th');
+function aggTable(rows,label){
+  if(!rows.length)return '<div class="card mut">No data.</div>';
+  return `<div class="card"><div class="mut small" style="margin-bottom:6px">Based on last ${P.stored.length} stored matches (${esc(MODES.find(x=>x[0]===P.mode)?.[1]||'')})</div><div class="tw"><table>
+  <tr><th>${label}</th><th>M</th><th>Win%</th><th>K/D</th><th>KDA</th><th>ACS</th><th>ADR</th><th>HS%</th><th>K</th><th>D</th><th>A</th></tr>
+  ${rows.map(r=>`<tr><td>${img(r.icon)}${esc(r.name)}</td><td>${r.games}</td><td>${pct(r.w,r.games)}</td><td>${div(r.k,r.d)}</td><td>${div(r.k+r.a,r.d)}</td><td>${div(r.score,r.rounds,0)}</td><td>${div(r.dmg,r.rounds,0)}</td><td>${pct(r.hs,r.hs+r.bs+r.lg)}</td><td>${r.k}</td><td>${r.d}</td><td>${r.a}</td></tr>`).join('')}
+  </table></div></div>`;
+}
+function tAgents(){
+  let rows=aggStored(m=>({k:m.stats?.character?.name,icon:agentIcon(m.stats?.character?.id)}));
+  if(!rows.length)rows=fromV4(p=>({k:p.agent?.name,icon:agentIcon(p.agent?.id)}));
+  $('#tc').innerHTML=aggTable(rows,'Agent');
+}
+function tMaps(){
+  let rows=aggStored(m=>({k:m.meta?.map?.name,icon:mapIcon(m.meta?.map?.id)}));
+  if(!rows.length)rows=fromV4((p,m)=>({k:m.metadata?.map?.name,icon:mapIcon(m.metadata?.map?.id)}));
+  $('#tc').innerHTML=aggTable(rows,'Map');
+}
+function fromV4(keyFn){
+  const out={};
+  for(const m of P.matches){const {pl,res}=matchSummary(m,P.puuid);if(!pl)continue;const key=keyFn(pl,m);if(!key?.k)continue;
+    const {S:st,nR}=analyzeMatch(m),x=st[P.puuid];
+    const o=(out[key.k]??={name:key.k,icon:key.icon,games:0,w:0,l:0,k:0,d:0,a:0,hs:0,bs:0,lg:0,dmg:0,score:0,rounds:0});
+    o.games++;if(res==='W')o.w++;if(res==='L')o.l++;o.k+=x.k;o.d+=x.d;o.a+=x.a;o.hs+=x.hs;o.bs+=x.bs;o.lg+=x.lg;o.dmg+=x.dmg;o.score+=x.score;o.rounds+=nR;}
+  return Object.values(out).sort((a,b)=>b.games-a.games);
+}
+function tWeapons(){
+  const W=Object.entries(P.adv.weapons).sort((a,b)=>b[1].k-a[1].k),tot=W.reduce((s,w)=>s+w[1].k,0);
+  if(!W.length){$('#tc').innerHTML='<div class="card mut">No kill data.</div>';return}
+  $('#tc').innerHTML=`<div class="card"><div class="mut small" style="margin-bottom:8px">Kills by weapon, last ${P.adv.games} detailed matches</div>
+  ${W.map(([name,v])=>`<div class="row" style="margin-bottom:8px">${v.id?`<img src="${MEDIA}/weapons/${esc(v.id.toLowerCase())}/killstreamicon.png" style="width:70px;height:22px;object-fit:contain" onerror="this.style.visibility='hidden'">`:'<span style="width:70px"></span>'}
+  <div class="grow"><div class="row small"><b class="grow">${esc(name)}</b><span>${v.k} <span class="mut">(${pct(v.k,tot)})</span></span></div><div class="bar"><i style="width:${100*v.k/W[0][1].k}%"></i></div></div></div>`).join('')}</div>`;
+}
+function tRanks(){
+  const h=(P.hist?.history||P.hist||[]).slice?.()||[];
+  const seas=P.mmr?.seasonal||(P.mmr?.by_season?Object.entries(P.mmr.by_season).map(([k,v])=>({season:{short:k},end_tier:{name:v.final_rank_patched,id:v.final_rank},wins:v.wins,games:v.number_of_games})):[]);
+  let chart='';
+  if(h.length>1){
+    const pts=h.slice().reverse().map(x=>x.elo).filter(v=>v!=null);
+    const mn=Math.min(...pts),mx=Math.max(...pts),W=320,H=120,rg=(mx-mn)||1;
+    const poly=pts.map((v,i)=>`${(i/(pts.length-1)*W).toFixed(1)},${(H-8-(v-mn)/rg*(H-16)).toFixed(1)}`).join(' ');
+    chart=`<div class="card"><h3>RR / ELO trend <span class="mut small">last ${pts.length} games</span></h3><svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="height:130px"><polyline points="${poly}" fill="none" stroke="#ff4655" stroke-width="2.5"/></svg><div class="row small mut"><span class="grow">${mn}</span><span>${mx}</span></div></div>`;
+  }
+  $('#tc').innerHTML=chart+
+  (h.length?`<div class="card"><h3>Recent RR changes</h3><div class="tw"><table><tr><th>Date</th><th>Map</th><th>Rank</th><th>RR</th><th>Δ</th></tr>
+  ${h.slice(0,30).map(x=>`<tr><td>${esc(new Date(x.date||x.date_raw*1000).toLocaleDateString())}</td><td>${esc(x.map?.name||'')}</td><td>${img(tierIcon(x.tier?.id??x.currenttier))}${esc(x.tier?.name||x.currenttierpatched||'')}</td><td>${esc(x.rr??x.ranking_in_tier??'')}</td><td class="${(x.last_change??x.mmr_change_to_last_game)>=0?'g':'r'}">${(x.last_change??x.mmr_change_to_last_game)>=0?'+':''}${esc(x.last_change??x.mmr_change_to_last_game)}</td></tr>`).join('')}</table></div></div>`:'')+
+  (seas.length?`<div class="card"><h3>Seasons</h3><div class="tw"><table><tr><th>Season</th><th>Final rank</th><th>W</th><th>M</th><th>Win%</th></tr>
+  ${seas.slice().reverse().map(s=>`<tr><td>${esc(s.season?.short||s.season)}</td><td>${img(tierIcon(s.end_tier?.id))}${esc(s.end_tier?.name||'')}</td><td>${s.wins??'–'}</td><td>${s.games??'–'}</td><td>${pct(s.wins,s.games)}</td></tr>`).join('')}</table></div></div>`:'')+
+  (!h.length&&!seas.length?'<div class="card mut">No ranked history.</div>':'');
+}
+
+// ---------- match detail ----------
+function vMatch(i){
+  const m=P.matches[i];if(!m){appBack();return}
+  const md=m.metadata||{},{S:st,nR}=analyzeMatch(m);
+  const teams=(m.teams||[]).length?m.teams:[{team_id:null}];
+  const {team:myT}=matchSummary(m,P.puuid);
+  const rounds=m.rounds||[];
+  const board=t=>{
+    const ps=Object.values(st).filter(x=>t.team_id==null||x.p.team_id===t.team_id).sort((a,b)=>b.score-a.score);
+    return `<div class="card"><h3>${t.team_id?`<span class="${t.won?'g':'r'}">${esc(t.team_id)} ${t.won?'— Victory':'— Defeat'}</span> <span class="mut">${t.rounds?.won??''}</span>`:'Scoreboard'}</h3><div class="tw"><table>
+    <tr><th>Player</th><th>ACS</th><th>K</th><th>D</th><th>A</th><th>+/-</th><th>K/D</th><th>ADR</th><th>HS%</th><th>KAST</th><th>FK</th><th>FD</th><th>MK</th><th>Econ</th></tr>
+    ${ps.map(x=>{const sh=x.hs+x.bs+x.lg,mk=x.mk[2]+x.mk[3]+x.mk[4]+x.mk[5];return `<tr class="${x.p.puuid===P.puuid?'me':''}" onclick='openP(${JSON.stringify({name:x.p.name,tag:x.p.tag,region:P.region,platform:P.platform}).replace(/'/g,"&#39;")})'>
+      <td>${img(agentIcon(x.p.agent?.id))}${esc(x.p.name)} ${x.p.tier?.id?img(tierIcon(x.p.tier.id)):''}</td><td><b>${div(x.score,nR,0)}</b></td><td>${x.k}</td><td>${x.d}</td><td>${x.a}</td>
+      <td class="${x.k-x.d>=0?'g':'r'}">${x.k-x.d>=0?'+':''}${x.k-x.d}</td><td>${div(x.k,x.d)}</td><td>${div(x.dmg,nR,0)}</td><td>${pct(x.hs,sh)}</td><td>${pct(x.kast,nR)}</td><td>${x.fk}</td><td>${x.fd}</td><td>${mk}</td><td>${x.econ?n(x.econ/nR/1000,1)+'k':'–'}</td></tr>`}).join('')}
+    </table></div></div>`;
+  };
+  $('#app').innerHTML=`<div class="card"><div class="row">${img(mapIcon(md.map?.id),'ag')}<div class="grow"><div class="big">${esc(md.map?.name)}</div>
+    <div class="mut small">${esc(md.queue?.name||'')} · ${esc(new Date(md.started_at).toLocaleString())} · ${n((md.game_length_in_ms||0)/60000,0)} min · ${esc(md.season?.short||'')}</div></div></div></div>
+  ${rounds.length?`<div class="card"><h3>Rounds</h3><div class="rounds">${rounds.map((r,j)=>{const w=r.winning_team===myT?.team_id;return `<span style="background:${w?'#3ddc9755':'#ff465555'}" title="${esc(r.result||'')}">${j+1}</span>`}).join('')}</div>
+    <div class="mut small" style="margin-top:6px">${['Elimination','Bomb detonated','Bomb defused','Round timer expired','Surrendered'].map(k=>{const c=rounds.filter(r=>r.result===k||r.end_type===k).length;return c?`${k}: ${c}`:''}).filter(Boolean).join(' · ')}</div></div>`:''}
+  ${teams.map(board).join('')}
+  <p class="mut small">Tap a player to open their profile. ACS = combat score/round, KAST = rounds with kill/assist/survived/traded, MK = multi-kill rounds, Econ = avg loadout value.</p>`;
+}
+
+render();
+</script>
+</body>
+</html>
