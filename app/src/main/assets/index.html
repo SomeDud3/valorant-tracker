@@ -77,8 +77,8 @@ const ago=d=>{const s=(Date.now()-new Date(d))/1000;if(!isFinite(s))return'';if(
 let cbId=0;const cbs={};
 window.__nativeCb=(id,status,body)=>{const f=cbs[id];delete cbs[id];if(f)f(status,body)};
 const cache={};
-function get(path){
-  if(cache[path])return Promise.resolve(cache[path]);
+function get(path,nocache){
+  if(!nocache&&cache[path])return Promise.resolve(cache[path]);
   const key=ls.get('apikey','');
   return new Promise((res,rej)=>{
     const done=(status,body)=>{
@@ -139,7 +139,7 @@ function vSettings(){
   <p class="mut small">Tracker.gg has no public Valorant API, so this app uses the free unofficial HenrikDev API. Get a key (Basic, free) by logging in with Discord at <a href="https://api.henrikdev.xyz/dashboard/">api.henrikdev.xyz/dashboard</a>.</p>
   <input id="k" placeholder="HDEV-xxxxxxxx-xxxx-..." value="${esc(ls.get('apikey',''))}" autocapitalize="off">
   <button class="btn" style="width:100%;margin-top:8px" onclick="ls.set('apikey',$('#k').value.trim());for(const k in cache)delete cache[k];appBack()">Save</button></div>
-  <div class="card"><h3>Data</h3><button class="btn sec" onclick="ls.set('recent',[]);ls.set('favs',[]);alertBox('Cleared')">Clear recent & favorites</button></div>`;
+  <div class="card"><h3>Data</h3><button class="btn sec" onclick="ls.set('recent',[]);ls.set('favs',[]);alertBox('Cleared')">Clear recent & favorites</button><br><br><button class="btn sec" onclick="for(const k of Object.keys(localStorage))if(/^(h|full):/.test(k))localStorage.removeItem(k);alertBox('Saved match history cleared')">Clear saved match history</button></div>`;
 }
 
 // ---------- profile ----------
@@ -154,16 +154,65 @@ async function loadProfile(){
   }
   const base=`${P.region}/${P.platform}/${nm}/${tg}`;
   const q=P.mode?`?mode=${P.mode}`:'?';
-  const [mmr,hist,matches,stored]=await Promise.allSettled([
+  const [mmr,hist,matches]=await Promise.allSettled([
     get(`/valorant/v3/mmr/${base}`),
     get(`/valorant/v2/mmr-history/${base}`),
-    get(`/valorant/v4/matches/${base}${q}&size=10`),
-    get(`/valorant/v1/stored-matches/${P.region}/${nm}/${tg}${q}&size=100`)
+    get(`/valorant/v4/matches/${base}${q}&size=10`)
   ]);
-  P.mmr=mmr.value?.data;P.hist=hist.value?.data;P.matches=matches.value?.data||[];P.stored=stored.value?.data||[];
-  P.errs=[mmr,hist,matches,stored].filter(x=>x.status==='rejected').map(x=>x.reason.message);
+  P.mmr=mmr.value?.data;P.hist=hist.value?.data;P.matches=matches.value?.data||[];
+  P.errs=[mmr,hist,matches].filter(x=>x.status==='rejected').map(x=>x.reason.message);
   P.puuid=P.acc.puuid;P.loaded=P.mode;
   P.adv=aggAdvanced(P.matches,P.puuid);
+  saveV4(P.matches);
+  if(!P.syncStarted){P.syncStarted=true;syncHistory()}
+}
+
+// ---------- local match history (lifetime) ----------
+// Every match ever seen is saved on the phone per player (keyed by puuid), so stats keep growing over time.
+const normMode=s=>String(s||'').toLowerCase().replace(/\s+/g,'');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function rows(){return P.rows??=ls.get('h:'+P.puuid,{})}
+function saveRows(){ls.set('h:'+P.puuid,P.rows)}
+function storedRow(m){
+  const s=m.stats||{},t=m.teams||{},my=(s.team||'').toLowerCase();
+  const mine=t[my]??0,opp=my==='red'?(t.blue??0):(t.red??0);
+  return {id:m.meta?.id,t:Date.parse(m.meta?.started_at)||0,mode:normMode(m.meta?.mode),map:m.meta?.map?.name,mapId:m.meta?.map?.id,
+    ag:s.character?.name,agId:s.character?.id,season:m.meta?.season?.short,k:s.kills||0,d:s.deaths||0,a:s.assists||0,
+    hs:s.shots?.head||0,bs:s.shots?.body||0,lg:s.shots?.leg||0,dmg:s.damage?.made||0,sc:s.score||0,r:(t.red||0)+(t.blue||0),
+    res:mine>opp?'W':mine<opp?'L':'D'};
+}
+function saveV4(ms){
+  const R=rows();
+  for(const m of ms){
+    const {pl,res}=matchSummary(m,P.puuid);if(!pl)continue;
+    const {S:st,nR}=analyzeMatch(m),x=st[P.puuid],md=m.metadata||{};
+    R[md.match_id]=Object.assign(R[md.match_id]||{},{id:md.match_id,t:Date.parse(md.started_at)||0,mode:normMode(md.queue?.name||md.queue?.id),
+      map:md.map?.name,mapId:md.map?.id,ag:pl.agent?.name,agId:pl.agent?.id,season:md.season?.short,k:x.k,d:x.d,a:x.a,hs:x.hs,bs:x.bs,lg:x.lg,
+      dmg:x.dmg,sc:x.score,r:nR,res,fk:x.fk,fd:x.fd,kast:x.kast,cl:x.clutch,m2:x.mk[2],m3:x.mk[3],m4:x.mk[4],m5:x.mk[5]});
+  }
+  saveRows();
+}
+function setSync(t){P.syncMsg=t;const e=$('#sync');if(e)e.textContent=t}
+async function syncHistory(){
+  const me=P,nm=enc(me.id.name),tg=enc(me.id.tag),fullKey='full:'+me.puuid,full=ls.get(fullKey,false);
+  let page=1,added=0,tries=0;
+  while(true){
+    setSync(`Syncing match history… page ${page} (${added} new)`);
+    let r;
+    try{r=await get(`/valorant/v1/stored-matches/${me.region}/${nm}/${tg}?page=${page}&size=100`,true)}
+    catch(e){if(e.status===429&&tries++<5){setSync('Rate limited — waiting 60s…');await sleep(60000);continue}
+      setSync('History sync stopped: '+e.message);return}
+    tries=0;
+    const data=r.data||[];let fresh=0;const R=me.rows??=ls.get('h:'+me.puuid,{});
+    for(const m of data){const row=storedRow(m);if(!row.id)continue;if(!R[row.id])fresh++;R[row.id]=Object.assign(R[row.id]||{},row,R[row.id])}
+    ls.set('h:'+me.puuid,R);added+=fresh;
+    const total=r.results?.total;
+    if(data.length<100||(total&&page*100>=total)){ls.set(fullKey,true);break}
+    if(full&&fresh===0)break; // already fully synced before: stop once we reach known matches
+    page++;await sleep(2500);
+  }
+  setSync(`History up to date · ${Object.keys(me.rows).length} matches saved${added?` (+${added} new)`:''}`);
+  if(P===me&&S.view==='profile'&&S.tab!=='matches')render();
 }
 async function moreMatches(){
   const b=$('#more');if(b){b.disabled=true;b.textContent='Loading…'}
@@ -172,7 +221,7 @@ async function moreMatches(){
     const r=await get(`/valorant/v4/matches/${P.region}/${P.platform}/${enc(P.id.name)}/${enc(P.id.tag)}${q}&size=10&start=${P.matches.length}`);
     const ids=new Set(P.matches.map(m=>m.metadata?.match_id));
     const add=(r.data||[]).filter(m=>!ids.has(m.metadata?.match_id));
-    P.matches.push(...add);P.adv=aggAdvanced(P.matches,P.puuid);
+    P.matches.push(...add);saveV4(add);P.adv=aggAdvanced(P.matches,P.puuid);
     if(!add.length&&b){b.textContent='No more matches';return}
   }catch(e){alertBox(e.message)}
   render();
@@ -273,16 +322,15 @@ function aggAdvanced(matches,me){
   }
   return A;
 }
-// stored matches (lightweight, up to 100) aggregate by key
+// saved matches (all time, filtered by selected mode) aggregated by key
+function modeRows(){return Object.values(rows()).filter(r=>!P.mode||r.mode===P.mode)}
 function aggStored(keyFn){
   const out={};
-  for(const m of P.stored){
-    const s=m.stats||{};const key=keyFn(m);if(!key)continue;
-    const o=(out[key.k]??={name:key.k,icon:key.icon,games:0,w:0,l:0,k:0,d:0,a:0,hs:0,bs:0,lg:0,dmg:0,score:0,rounds:0});
-    const my=(s.team||'').toLowerCase(),t=m.teams||{};const mine=t[my]??0,opp=my==='red'?t.blue:t.red;
-    o.games++;if(mine>opp)o.w++;else if(mine<opp)o.l++;
-    o.k+=s.kills||0;o.d+=s.deaths||0;o.a+=s.assists||0;o.hs+=s.shots?.head||0;o.bs+=s.shots?.body||0;o.lg+=s.shots?.leg||0;
-    o.dmg+=s.damage?.made||0;o.score+=s.score||0;o.rounds+=(t.red||0)+(t.blue||0);
+  for(const r of modeRows()){
+    const key=keyFn(r);if(!key?.k)continue;
+    const o=(out[key.k]??={name:key.k,icon:key.icon,games:0,w:0,l:0,k:0,d:0,a:0,hs:0,bs:0,lg:0,dmg:0,score:0,rounds:0,first:Infinity});
+    o.games++;if(r.res==='W')o.w++;else if(r.res==='L')o.l++;
+    o.k+=r.k;o.d+=r.d;o.a+=r.a;o.hs+=r.hs;o.bs+=r.bs;o.lg+=r.lg;o.dmg+=r.dmg;o.score+=r.sc;o.rounds+=r.r;if(r.t&&r.t<o.first)o.first=r.t;
   }
   return Object.values(out).sort((a,b)=>b.games-a.games);
 }
@@ -316,13 +364,23 @@ function tOverview(){
   <h3 style="margin-top:12px">Accuracy</h3>
   ${['Head','Body','Legs'].map((l,i)=>{const v=[A.hs,A.bs,A.lg][i];return `<div class="row small"><span style="width:44px">${l}</span><div class="bar grow"><i style="width:${hsAll?100*v/hsAll:0}%"></i></div><span style="width:70px;text-align:right">${pct(v,hsAll)} <span class="mut">(${v})</span></span></div>`}).join('<div style="height:6px"></div>')}
   </div>`:''}
-  ${tot?`<div class="card"><h3>Last ${tot.games} matches <span class="mut small">(summary)</span></h3><div class="grid">
+  ${lifeAdv()}
+  ${tot?`<div class="card"><h3>Lifetime <span class="mut small">${tot.games} saved matches since ${esc(new Date(tot.first).toLocaleDateString())}</span></h3><div class="grid">
     ${statBox('Win %',pct(tot.w,tot.games))}${statBox('K/D',div(tot.k,tot.d))}${statBox('KDA',div(tot.k+tot.a,tot.d))}
     ${statBox('ACS',div(tot.score,tot.rounds,0))}${statBox('ADR',div(tot.dmg,tot.rounds,0))}${statBox('HS%',pct(tot.hs,tot.hs+tot.bs+tot.lg))}
     ${statBox('Wins',tot.w)}${statBox('Losses',tot.l)}${statBox('Kills',tot.k)}
-  </div></div>`:''}
-  ${topList('Top Agents',aggStored(m=>({k:m.stats?.character?.name,icon:agentIcon(m.stats?.character?.id)})).slice(0,3))}
-  ${topList('Top Maps',aggStored(m=>({k:m.meta?.map?.name,icon:mapIcon(m.meta?.map?.id)})).slice(0,3))}`;
+    ${statBox('Deaths',tot.d)}${statBox('Assists',tot.a)}${statBox('~Hours',n(tot.rounds*1.75/60,0))}
+  </div><div id="sync" class="mut small" style="margin-top:8px">${esc(P.syncMsg||'')}</div></div>`:`<div class="card mut small" id="sync">${esc(P.syncMsg||'')}</div>`}
+  ${topList('Top Agents',aggStored(r=>({k:r.ag,icon:agentIcon(r.agId)})).slice(0,3))}
+  ${topList('Top Maps',aggStored(r=>({k:r.map,icon:mapIcon(r.mapId)})).slice(0,3))}`;
+}
+function lifeAdv(){
+  // advanced stats only exist for matches the app downloaded in full (saved from now on)
+  const rs=modeRows().filter(r=>r.fk!=null);if(rs.length<2)return'';
+  const t=k=>rs.reduce((s,r)=>s+(r[k]||0),0),rd=t('r');
+  return `<div class="card"><h3>Advanced lifetime <span class="mut small">${rs.length} fully saved matches</span></h3><div class="grid">
+  ${statBox('KAST',pct(t('kast'),rd))}${statBox('First Bloods',t('fk'))}${statBox('First Deaths',t('fd'))}
+  ${statBox('Clutches',t('cl'))}${statBox('3K+',t('m3')+t('m4'))}${statBox('Aces',t('m5'),'y')}</div></div>`;
 }
 function topList(title,rows){
   if(!rows.length)return'';
@@ -347,18 +405,18 @@ function tMatches(){
 const ord=n=>n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:(n%10<4?n%10:0)]||'th');
 function aggTable(rows,label){
   if(!rows.length)return '<div class="card mut">No data.</div>';
-  return `<div class="card"><div class="mut small" style="margin-bottom:6px">Based on last ${P.stored.length} stored matches (${esc(MODES.find(x=>x[0]===P.mode)?.[1]||'')})</div><div class="tw"><table>
+  return `<div class="card"><div class="mut small" style="margin-bottom:6px">All ${modeRows().length} saved matches (${esc(MODES.find(x=>x[0]===P.mode)?.[1]||'')})</div><div class="tw"><table>
   <tr><th>${label}</th><th>M</th><th>Win%</th><th>K/D</th><th>KDA</th><th>ACS</th><th>ADR</th><th>HS%</th><th>K</th><th>D</th><th>A</th></tr>
   ${rows.map(r=>`<tr><td>${img(r.icon)}${esc(r.name)}</td><td>${r.games}</td><td>${pct(r.w,r.games)}</td><td>${div(r.k,r.d)}</td><td>${div(r.k+r.a,r.d)}</td><td>${div(r.score,r.rounds,0)}</td><td>${div(r.dmg,r.rounds,0)}</td><td>${pct(r.hs,r.hs+r.bs+r.lg)}</td><td>${r.k}</td><td>${r.d}</td><td>${r.a}</td></tr>`).join('')}
   </table></div></div>`;
 }
 function tAgents(){
-  let rows=aggStored(m=>({k:m.stats?.character?.name,icon:agentIcon(m.stats?.character?.id)}));
+  let rows=aggStored(r=>({k:r.ag,icon:agentIcon(r.agId)}));
   if(!rows.length)rows=fromV4(p=>({k:p.agent?.name,icon:agentIcon(p.agent?.id)}));
   $('#tc').innerHTML=aggTable(rows,'Agent');
 }
 function tMaps(){
-  let rows=aggStored(m=>({k:m.meta?.map?.name,icon:mapIcon(m.meta?.map?.id)}));
+  let rows=aggStored(r=>({k:r.map,icon:mapIcon(r.mapId)}));
   if(!rows.length)rows=fromV4((p,m)=>({k:m.metadata?.map?.name,icon:mapIcon(m.metadata?.map?.id)}));
   $('#tc').innerHTML=aggTable(rows,'Map');
 }
